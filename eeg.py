@@ -57,6 +57,70 @@ def split_into_windows(group, window_size=256):
     return windows
 
 
+def calculate_time_domain_features(window):
+    """
+    Calculate time-domain statistical features from an EEG signal window.
+    Params:
+        window (pd.DataFrame): A DataFrame containing the sensor values in a single window.
+    Returns:
+        dict: A dictionary containing the extracted features.
+    """
+    sensor_values = window['sensor_value'].values
+
+    features = {
+        # Mean Amplitude
+        'mean_amplitude': np.mean(sensor_values),
+
+        # Variance
+        'variance': np.var(sensor_values),
+
+        # Skewness
+        'skewness': stats.skew(sensor_values),
+
+        # Kurtosis
+        'kurtosis': stats.kurtosis(sensor_values),
+
+        # Maximum Value
+        'max_value': np.max(sensor_values),
+
+        # Minimum Value
+        'min_value': np.min(sensor_values),
+
+        # Root Mean Square (RMS)
+        'rms': np.sqrt(np.mean(sensor_values ** 2))
+    }
+    return features
+
+
+def extract_features_from_trials(trials, window_size=256):
+    """
+    Extract statistical features from all windows in the provided trials.
+    Params:
+        trials (pd.DataFrame): A DataFrame containing all EEG trials data.
+        window_size (int): Number of samples per window.
+    Returns:
+        pd.DataFrame: A DataFrame containing the extracted features for each window.
+    """
+    feature_list = []
+    grouped = trials.groupby(['trial_number', 'sensor_position', 'matching_condition'])
+    for name, group in grouped:
+        subject_identifier = group['subject_identifier'].iloc[0]
+        patient_id = group['name'].iloc[0]
+        windows = split_into_windows(group, window_size)
+
+        for window in windows:
+            features = calculate_time_domain_features(window)
+
+            features['trial_number'] = name[0]
+            features['sensor_position'] = name[1]
+            features['subject_identifier'] = subject_identifier  # Add subject identifier
+            features['matching_condition'] = group['matching_condition'].iloc[0]
+            features['name'] = patient_id
+
+            feature_list.append(features)
+    return pd.DataFrame(feature_list)
+
+
 def apply_fft(data, sampling_rate):
     """ Group the data by trial and sensor, filter the signal, and apply FFT.
     Params: data (pd.DataFrame): The dataset containing EEG trials and sensor readings.
@@ -201,41 +265,42 @@ def conduct_t_tests(data):
 
 
 if __name__ == "__main__":
+    # Step 1: Load all trials from the training folder
     train_data = load_all_trials_from_folder(train_folder)
 
-    # Initialize an empty list to hold the power distribution from all files
-    all_power_distributions = []
+    # Step 2: Extract statistical features from the trials data
+    print("Extracting statistical features from EEG signals...")
+    extracted_features_df = extract_features_from_trials(train_data)
 
-    # Iterate through each CSV file in the folder
-    for filename in os.listdir(train_folder):
-        if filename.endswith(".csv"):
-            file_path = os.path.join(train_folder, filename)
-            trial_data = pd.read_csv(file_path, sep=',', header=0, names=columns)
-            power_distribution_df = calculate_power_distribution(trial_data, sampling_rate, filename)
-            all_power_distributions.append(power_distribution_df)
+    # Step 3: Separate numeric columns for aggregation
+    numeric_cols = extracted_features_df.select_dtypes(include=np.number).columns
 
-    # Concatenate all the results into a single DataFrame
-    final_power_distribution_df = pd.concat(all_power_distributions, ignore_index=True)
+    # Aggregate numeric features by patient and matching condition
+    numeric_aggregated_features = extracted_features_df.groupby(['name', 'matching_condition'])[numeric_cols].mean().reset_index()
 
-    print("\nPower Distribution table:")
-    print(final_power_distribution_df.head())
+    # Extract non-numeric columns to preserve information (e.g., subject_identifier)
+    non_numeric_cols = ['name', 'subject_identifier']
+    non_numeric_data = extracted_features_df[non_numeric_cols].drop_duplicates('name')
 
-    summary_df = summarize_power_by_group(final_power_distribution_df)
-    print("\nSum of Power / Group (Alcoholic and Control):")
-    print(summary_df)
+    # Merge aggregated numeric features with non-numeric data
+    patient_aggregated_features = pd.merge(numeric_aggregated_features, non_numeric_data, on='name')
 
-    # Conduct t-tests for each frequency band
-    ttest_results = conduct_t_tests(final_power_distribution_df)
+    # Step 4: Separate the data into alcoholic and control groups based on subject_identifier
+    alcoholic_data = patient_aggregated_features[patient_aggregated_features['subject_identifier'] == 'a']
+    control_data = patient_aggregated_features[patient_aggregated_features['subject_identifier'] == 'c']
 
-    print("\nT-Test results (Alcoholic vs Control):")
-    for band, result in ttest_results.items():
-        print(f"{band.capitalize()} Band: t-statistic = {result['t_stat']:.3f}, p-value = {result['p_value']:.5f}")
+    # Display the aggregated features for both groups
+    print("\nAggregated Features (Alcoholic Group):")
+    print(alcoholic_data.head())
 
-    # Interpretation based on p-values
-    print("\nInterpretation:")
-    for band, result in ttest_results.items():
-        if result['p_value'] < 0.05:
-            print(f"Significant difference in {band} band power between alcoholic and control groups (p < 0.05).")
-        else:
-            print(f"No significant difference in {band} band power between alcoholic and control groups.")
+    print("\nAggregated Features (Control Group):")
+    print(control_data.head())
+
+    # Step 5: Display the count of each group
+    print("\nCounts per Group (Aggregated by Patient):")
+    print("Alcoholics:", len(alcoholic_data))
+    print("Controls:", len(control_data))
+
+    print("Feature extraction and aggregation complete!")
+
 
