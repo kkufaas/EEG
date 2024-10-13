@@ -1,8 +1,15 @@
+import tarfile
 import pandas as pd
 import numpy as np
 import os
+
+import seaborn as sns
 from scipy.signal import butter, filtfilt
 from scipy import stats
+from scipy.stats import ttest_ind
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 
 ###################################### README ########################################
@@ -11,13 +18,24 @@ import matplotlib.pyplot as plt
 # There are Test and Train folders, and loose files.
 # Only keep Train folder on your PC, it's enough for our task.
 train_folder = "/Users/kristina/Dropbox/Mac/Desktop/Train"
+test_folder = "/Users/kristina/Dropbox/Mac/Desktop/Test"
 ######################################################################################
 
 
-columns = [
+columns_raw_data = [
     'trial_number', 'sensor_position', 'sample_num', 'sensor_value',
     'subject_identifier', 'matching_condition', 'channel', 'name', 'time'
 ]
+
+weights = {
+    'mean_amplitude': 0.05,
+    'variance': 0.20,
+    'skewness': 0.05,
+    'kurtosis': 0.05,
+    'max_value': 0.10,
+    'min_value': 0.15,
+    'rms': 0.40
+}
 
 sampling_rate = 256.0  # in Hz. It means that there are 256 samples are recorded every second for each EEG sensor.
 # The sensor values in dataset (in micro volts) are processed with FFT (see apply_fft) to compute the power in different
@@ -38,7 +56,7 @@ def load_all_trials_from_folder(folder_path):
     for filename in os.listdir(folder_path):
         if filename.endswith(".csv"):
             file_path = os.path.join(folder_path, filename)
-            trial_data = pd.read_csv(file_path, sep=',', header=0, names=columns)
+            trial_data = pd.read_csv(file_path, sep=',', header=0, names=columns_raw_data)
             all_trials.append(trial_data)
     return pd.concat(all_trials, ignore_index=True)
 
@@ -70,6 +88,9 @@ def calculate_time_domain_features(window):
     features = {
         # Mean Amplitude
         'mean_amplitude': np.mean(sensor_values),
+
+        # StDev
+        'standard deviation': np.std(sensor_values),
 
         # Variance
         'variance': np.var(sensor_values),
@@ -111,7 +132,7 @@ def extract_features_from_trials(trials, window_size=256):
         for window in windows:
             features = calculate_time_domain_features(window)
 
-            features['trial_number'] = name[0]
+            # features['trial_number'] = name[0]
             features['sensor_position'] = name[1]
             features['subject_identifier'] = subject_identifier  # Add subject identifier
             features['matching_condition'] = group['matching_condition'].iloc[0]
@@ -265,42 +286,62 @@ def conduct_t_tests(data):
 
 
 if __name__ == "__main__":
-    # Step 1: Load all trials from the training folder
+    columns = ['trial_number', 'sensor_position', 'sample_num', 'sensor_value', 'subject_identifier',
+               'matching_condition', 'channel', 'name', 'time']
+
     train_data = load_all_trials_from_folder(train_folder)
-
-    # Step 2: Extract statistical features from the trials data
-    print("Extracting statistical features from EEG signals...")
     extracted_features_df = extract_features_from_trials(train_data)
-
-    # Step 3: Separate numeric columns for aggregation
     numeric_cols = extracted_features_df.select_dtypes(include=np.number).columns
+    numeric_aggregated_features = extracted_features_df.groupby(['name', 'matching_condition'])[
+        numeric_cols].mean().reset_index()
 
-    # Aggregate numeric features by patient and matching condition
-    numeric_aggregated_features = extracted_features_df.groupby(['name', 'matching_condition'])[numeric_cols].mean().reset_index()
-
-    # Extract non-numeric columns to preserve information (e.g., subject_identifier)
     non_numeric_cols = ['name', 'subject_identifier']
     non_numeric_data = extracted_features_df[non_numeric_cols].drop_duplicates('name')
-
-    # Merge aggregated numeric features with non-numeric data
     patient_aggregated_features = pd.merge(numeric_aggregated_features, non_numeric_data, on='name')
 
-    # Step 4: Separate the data into alcoholic and control groups based on subject_identifier
+    # Calculate the cognitive score and add it as a new column
+    patient_aggregated_features['cognitive_score'] = (
+            patient_aggregated_features['mean_amplitude'] * weights['mean_amplitude'] +
+            patient_aggregated_features['variance'] * weights['variance'] +
+            patient_aggregated_features['skewness'] * weights['skewness'] +
+            patient_aggregated_features['kurtosis'] * weights['kurtosis'] +
+            patient_aggregated_features['max_value'] * weights['max_value'] +
+            patient_aggregated_features['min_value'] * weights['min_value'] +
+            patient_aggregated_features['rms'] * weights['rms']
+    )
+
     alcoholic_data = patient_aggregated_features[patient_aggregated_features['subject_identifier'] == 'a']
     control_data = patient_aggregated_features[patient_aggregated_features['subject_identifier'] == 'c']
 
-    # Display the aggregated features for both groups
-    print("\nAggregated Features (Alcoholic Group):")
-    print(alcoholic_data.head())
+    # List of parameters to analyze
+    parameters = ['mean_amplitude', 'variance', 'skewness', 'kurtosis', 'rms', 'min_value', 'max_value']
+    matching_conditions = ['S1 obj', 'S2 match', 'S2 nomatch,']  # List of matching conditions to analyze
 
-    print("\nAggregated Features (Control Group):")
-    print(control_data.head())
+    # Initialize lists to store t-test results
+    t_stats = []
+    p_values = []
+    matching_condition_list = []
 
-    # Step 5: Display the count of each group
-    print("\nCounts per Group (Aggregated by Patient):")
-    print("Alcoholics:", len(alcoholic_data))
-    print("Controls:", len(control_data))
+    for condition in matching_conditions:
+        for param in parameters:
+            data_alcoholic = alcoholic_data[alcoholic_data['matching_condition'] == condition][param]
+            data_control = control_data[control_data['matching_condition'] == condition][param]
+            t_stat, p_value = ttest_ind(data_alcoholic, data_control)
+            t_stats.append(t_stat)
+            p_values.append(p_value)
+            matching_condition_list.append(condition)
 
-    print("Feature extraction and aggregation complete!")
+    t_test_summary = pd.DataFrame({
+        'Parameter': parameters * len(matching_conditions),
+        'Matching Condition': matching_condition_list,
+        'T-statistic': t_stats,
+        'P-value': p_values
+    })
 
+    print("\nT-Test:")
+    print(t_test_summary)
+
+    print("\nCognitive scores per patient for each Mmtching condition:")
+    cognitive_scores_df = patient_aggregated_features[['name', 'matching_condition', 'cognitive_score']]
+    print(cognitive_scores_df.to_string(index=False))  # Display without index
 
