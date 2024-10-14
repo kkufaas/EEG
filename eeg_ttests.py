@@ -15,8 +15,7 @@ import matplotlib.pyplot as plt
 ###################################### README ########################################
 # Add path to your local folder here. GitHub has a file size limit of 100 MB per file.
 # Files can be downloaded here> https://www.kaggle.com/datasets/nnair25/Alcoholics/data
-# There are Test and Train folders, and loose files.
-# Only keep Train folder on your PC, it's enough for our task.
+# There are Test and Train folders
 train_folder = "/Users/kristina/Dropbox/Mac/Desktop/Train"
 test_folder = "/Users/kristina/Dropbox/Mac/Desktop/Test"
 ######################################################################################
@@ -345,101 +344,113 @@ if __name__ == "__main__":
                'matching_condition', 'channel', 'name', 'time']
 
     train_data = load_all_trials_from_folder(train_folder)
-    test_data = load_all_trials_from_folder(test_folder)
 
-    # 1. TIME-DOMAIN FEATURES T-TEST (Train Data)
-    # Extract time-domain features from training data
-    extracted_time_features_train_df = extract_features_from_trials(train_data)
+    # TIME-DOMAIN FEATURES T-TEST
+    extracted_time_features_df = extract_features_from_trials(train_data)
 
-    # Aggregate numeric time-domain features for training data
-    numeric_cols_train = extracted_time_features_train_df.select_dtypes(include=np.number).columns
-    numeric_aggregated_train_features = extracted_time_features_train_df.groupby(['name', 'matching_condition'])[
-        numeric_cols_train].mean().reset_index()
+    # Aggregate numeric time-domain features
+    numeric_cols = extracted_time_features_df.select_dtypes(include=np.number).columns
+    numeric_aggregated_features = extracted_time_features_df.groupby(['name', 'matching_condition'])[
+        numeric_cols].mean().reset_index()
 
-    # Extract non-numeric columns from training data
-    non_numeric_train_cols = ['name', 'subject_identifier']
-    non_numeric_train_data = extracted_time_features_train_df[non_numeric_train_cols].drop_duplicates('name')
+    # Extract non-numeric columns to preserve information (e.g., subject_identifier)
+    non_numeric_cols = ['name', 'subject_identifier']
+    non_numeric_data = extracted_time_features_df[non_numeric_cols].drop_duplicates('name')
 
-    # Merge time-domain features for training data
-    train_patient_aggregated_features = pd.merge(numeric_aggregated_train_features, non_numeric_train_data, on='name')
+    # Merge time-domain features
+    patient_aggregated_features = pd.merge(numeric_aggregated_features, non_numeric_data, on='name')
 
-    # Calculate cognitive score for training data (based on time-domain features)
-    train_patient_aggregated_features['cognitive_score'] = (
-            train_patient_aggregated_features['mean_amplitude'] * weights['mean_amplitude'] +
-            train_patient_aggregated_features['variance'] * weights['variance'] +
-            train_patient_aggregated_features['skewness'] * weights['skewness'] +
-            train_patient_aggregated_features['kurtosis'] * weights['kurtosis'] +
-            train_patient_aggregated_features['max_value'] * weights['max_value'] +
-            train_patient_aggregated_features['min_value'] * weights['min_value'] +
-            train_patient_aggregated_features['rms'] * weights['rms']
+    # Calculate cognitive score and add as a new column (based on time-domain features)
+    patient_aggregated_features['cognitive_score'] = (
+        patient_aggregated_features['mean_amplitude'] * weights['mean_amplitude'] +
+        patient_aggregated_features['variance'] * weights['variance'] +
+        patient_aggregated_features['skewness'] * weights['skewness'] +
+        patient_aggregated_features['kurtosis'] * weights['kurtosis'] +
+        patient_aggregated_features['max_value'] * weights['max_value'] +
+        patient_aggregated_features['min_value'] * weights['min_value'] +
+        patient_aggregated_features['rms'] * weights['rms']
     )
 
-    # Separate alcoholic and control groups for training data
-    alcoholic_train_data = train_patient_aggregated_features[
-        train_patient_aggregated_features['subject_identifier'] == 'a']
-    control_train_data = train_patient_aggregated_features[
-        train_patient_aggregated_features['subject_identifier'] == 'c']
+    alcoholic_data = patient_aggregated_features[patient_aggregated_features['subject_identifier'] == 'a']
+    control_data = patient_aggregated_features[patient_aggregated_features['subject_identifier'] == 'c']
 
-    # 2. TIME-DOMAIN FEATURES T-TEST (Test Data)
-    # Extract time-domain features from test data
-    extracted_time_features_test_df = extract_features_from_trials(test_data)
-
-    # Aggregate numeric time-domain features for test data
-    numeric_cols_test = extracted_time_features_test_df.select_dtypes(include=np.number).columns
-    numeric_aggregated_test_features = extracted_time_features_test_df.groupby(['name', 'matching_condition'])[
-        numeric_cols_test].mean().reset_index()
-
-    # Extract non-numeric columns from test data
-    non_numeric_test_cols = ['name', 'subject_identifier']
-    non_numeric_test_data = extracted_time_features_test_df[non_numeric_test_cols].drop_duplicates('name')
-
-    # Merge time-domain features for test data
-    test_patient_aggregated_features = pd.merge(numeric_aggregated_test_features, non_numeric_test_data, on='name')
-
-    # Calculate cognitive score for test data (based on time-domain features)
-    test_patient_aggregated_features['cognitive_score'] = (
-            test_patient_aggregated_features['mean_amplitude'] * weights['mean_amplitude'] +
-            test_patient_aggregated_features['variance'] * weights['variance'] +
-            test_patient_aggregated_features['skewness'] * weights['skewness'] +
-            test_patient_aggregated_features['kurtosis'] * weights['kurtosis'] +
-            test_patient_aggregated_features['max_value'] * weights['max_value'] +
-            test_patient_aggregated_features['min_value'] * weights['min_value'] +
-            test_patient_aggregated_features['rms'] * weights['rms']
-    )
-
-    # Separate alcoholic and control groups for test data
-    alcoholic_test_data = test_patient_aggregated_features[
-        test_patient_aggregated_features['subject_identifier'] == 'a']
-    control_test_data = test_patient_aggregated_features[test_patient_aggregated_features['subject_identifier'] == 'c']
-
-    # Model Training and Evaluation
+    # Time-domain parameters to analyze
     time_domain_parameters = ['mean_amplitude', 'variance', 'skewness', 'kurtosis', 'rms', 'min_value', 'max_value']
+    matching_conditions = ['S1 obj', 'S2 match', 'S2 nomatch,']  # List of matching conditions to analyze
 
-    # Define input features (X) and target variable (y) for training
-    X_train = train_patient_aggregated_features[time_domain_parameters]  # Input features (train)
-    y_train = train_patient_aggregated_features['cognitive_score']  # Target (train)
+    # Initialize lists for time-domain t-test results
+    time_t_stats = []
+    time_p_values = []
+    time_matching_condition_list = []
 
-    # Define input features (X) and target variable (y) for testing
-    X_test = test_patient_aggregated_features[time_domain_parameters]  # Input features (test)
-    y_test = test_patient_aggregated_features['cognitive_score']  # Target (test)
+    # Run t-test for each time-domain parameter and matching condition
+    for condition in matching_conditions:
+        for param in time_domain_parameters:
+            data_alcoholic = alcoholic_data[alcoholic_data['matching_condition'] == condition][param]
+            data_control = control_data[control_data['matching_condition'] == condition][param]
+            t_stat, p_value = ttest_ind(data_alcoholic, data_control)
+            time_t_stats.append(t_stat)
+            time_p_values.append(p_value)
+            time_matching_condition_list.append(condition)
 
-    # Initialize the RandomForestRegressor
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-
-    # Train the model on the training data
-    model.fit(X_train, y_train)
-
-    # Predict on test set
-    y_pred = model.predict(X_test)
-
-    # Evaluate the model on test data
-    mse = mean_squared_error(y_test, y_pred)
-    print("Mean squared error (MSE) on test set:", mse)
-
-    # Print actual vs predicted cognitive scores for inspection
-    comparison_df = pd.DataFrame({
-        'Actual cognitive score (Test)': y_test,
-        'Predicted cognitive score': y_pred
+    time_t_test_summary = pd.DataFrame({
+        'Parameter': time_domain_parameters * len(matching_conditions),
+        'Matching Condition': time_matching_condition_list,
+        'T-statistic': time_t_stats,
+        'P-value': time_p_values
     })
-    print("\nComparison of actual vs predicted cognitive scores (Test Data):")
-    print(comparison_df.head())
+
+    print("\nTime-Domain T-Test:")
+    print(time_t_test_summary)
+
+    print("\nCognitive scores per patient for each matching condition:")
+    cognitive_scores_df = patient_aggregated_features[['name', 'matching_condition', 'cognitive_score']]
+    print(cognitive_scores_df.to_string(index=False))  # Display without index
+
+    # 2. FREQUENCY-DOMAIN FEATURES T-TEST
+    # Extract frequency-domain features using FFT
+    extracted_frequency_features_df = extract_frequency_features_from_trials(train_data, sampling_rate=sampling_rate)
+
+    # Aggregate frequency-domain features
+    frequency_numeric_cols = ['delta', 'theta', 'alpha', 'beta', 'theta_alpha_ratio', 'delta_beta_ratio']
+    frequency_aggregated_features = extracted_frequency_features_df.groupby(['name', 'matching_condition'])[
+        frequency_numeric_cols].mean().reset_index()
+
+    # Merge non-numeric data into frequency-domain features
+    frequency_patient_aggregated_features = pd.merge(frequency_aggregated_features, non_numeric_data, on='name')
+
+    # Separate alcoholic and control groups for frequency-domain features
+    alcoholic_data_freq = frequency_patient_aggregated_features[frequency_patient_aggregated_features['subject_identifier'] == 'a']
+    control_data_freq = frequency_patient_aggregated_features[frequency_patient_aggregated_features['subject_identifier'] == 'c']
+
+    # Frequency-domain parameters to analyze (including ratios)
+    frequency_domain_parameters = ['delta', 'theta', 'alpha', 'beta', 'theta_alpha_ratio', 'delta_beta_ratio']
+
+    # Initialize lists for frequency-domain t-test results
+    freq_t_stats = []
+    freq_p_values = []
+    freq_matching_condition_list = []
+
+    # Run t-test for each frequency-domain parameter and matching condition
+    for condition in matching_conditions:
+        for param in frequency_domain_parameters:
+            data_alcoholic = alcoholic_data_freq[alcoholic_data_freq['matching_condition'] == condition][param]
+            data_control = control_data_freq[control_data_freq['matching_condition'] == condition][param]
+            t_stat, p_value = ttest_ind(data_alcoholic, data_control, nan_policy='omit')
+            freq_t_stats.append(t_stat)
+            freq_p_values.append(p_value)
+            freq_matching_condition_list.append(condition)
+
+    freq_t_test_summary = pd.DataFrame({
+        'Parameter': frequency_domain_parameters * len(matching_conditions),
+        'Matching Condition': freq_matching_condition_list,
+        'T-statistic': freq_t_stats,
+        'P-value': freq_p_values
+    })
+
+    # print("\nFrequency-Domain T-Test:")
+    # print(freq_t_test_summary)
+
+
+
+
