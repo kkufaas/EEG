@@ -343,18 +343,3 @@ if __name__ == "__main__":
     print("\nCognitive scores per patient for each Mmtching condition:")
     cognitive_scores_df = patient_aggregated_features[['name', 'matching_condition', 'cognitive_score']]
     print(cognitive_scores_df.to_string(index=False))  # Display without index
-
-
-    # Step 2: Extract frequency-domain features from the trials data using FFT
-    print("Extracting frequency-domain features from EEG signals using FFT...")
-    frequency_features_df = apply_fft_with_features(train_data, sampling_rate)
-
-    # Display the frequency-domain features for each trial
-    print("\nFrequency-Domain Features (Head of DataFrame):")
-    print(frequency_features_df.head())
-
-    # Step 3: Summarize the power ratios and peak frequencies
-    print("\nSummarized Power Ratios and Peak Frequencies:")
-    print(frequency_features_df[['trial_number', 'sensor_position', 'peak_frequency', 'theta_alpha_ratio', 'delta_beta_ratio']].head())
-
-    print("Feature extraction complete!")
