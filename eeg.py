@@ -393,6 +393,36 @@ def apply_fft_with_features(data, sampling_rate):
 
     return pd.DataFrame(freq_domain_features)
 
+# clustering
+def perform_clustering(data, n_clusters_list=[3]):
+    # Velg kolonner for clustering (f.eks. delta, theta, alpha, beta power)
+    features = ['delta', 'theta', 'alpha', 'beta', 'theta_alpha_ratio', 'delta_beta_ratio']
+    X = data[features]
+
+    # Standardiser dataene
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # For hver verdi i n_clusters_list, utfør clustering og visualisering
+    for n_clusters in n_clusters_list:
+        # KMeans clustering
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        data['cluster'] = kmeans.fit_predict(X_scaled)
+
+        # Reduser dimensjoner med PCA
+        pca = PCA(n_components=2)
+        principal_components = pca.fit_transform(X_scaled)
+        data['PC1'] = principal_components[:, 0]
+        data['PC2'] = principal_components[:, 1]
+
+        # Plot clustering
+        plt.figure(figsize=(10, 6))
+        sns.scatterplot(data=data, x='PC1', y='PC2', hue='cluster', palette='viridis')
+        plt.title(f'Clustering of EEG Data with {n_clusters} Clusters')
+        plt.show()
+
+    return data
+
 if __name__ == "__main__":
     columns = ['trial_number', 'sensor_position', 'sample_num', 'sensor_value', 'subject_identifier',
                'matching_condition', 'channel', 'name', 'time']
@@ -467,3 +497,30 @@ if __name__ == "__main__":
     print(frequency_features_df[['trial_number', 'sensor_position', 'peak_frequency', 'theta_alpha_ratio', 'delta_beta_ratio']].head())
 
     print("Feature extraction complete!")
+
+    # Check for NaN values
+    print("Checking for NaN values in frequency_features_df...")
+    print(frequency_features_df.isna().sum())
+
+    # Option 1: Drop rows with NaN values
+    frequency_features_df = frequency_features_df.dropna()
+
+    # Option 2: Fill NaN values with the mean of each column (uncomment to use)
+    # frequency_features_df.fillna(frequency_features_df.mean(), inplace=True)
+
+    # Check for infinite values in numeric columns
+    print("Checking for infinite values in frequency_features_df...")
+    numeric_columns = frequency_features_df.select_dtypes(include=[np.number]).columns
+    print(np.isinf(frequency_features_df[numeric_columns]).sum())
+
+    # Optionally, replace infinite values with NaN
+    frequency_features_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+    # Drop rows with NaN values after replacing infinite values
+    frequency_features_df = frequency_features_df.dropna()
+
+    # Step 8: Perform clustering on frequency-domain features with multiple n_clusters values
+    frequency_features_df = perform_clustering(frequency_features_df, n_clusters_list=[3, 4, 5])
+
+    # Visualize clusters and analyze
+    print(frequency_features_df.groupby('cluster').mean())
